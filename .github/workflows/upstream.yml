@@ -1,0 +1,41 @@
+name: upstream
+
+# Follows bol-van/zapret2 releases: when a newer one is out, bump packages/zapret2/Makefile
+# on main and start a build, which publishes it to the Pages repository.
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # push the version bump
+  actions: write    # start build.yml
+
+concurrency:
+  group: upstream
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check for a new zapret2 release
+        id: up
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "tag=$(./update-upstream.sh)" >> "$GITHUB_OUTPUT"
+
+      # a push made with GITHUB_TOKEN does not trigger other workflows,
+      # workflow_dispatch does, so build.yml is started explicitly
+      - name: Commit and build
+        if: steps.up.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.up.outputs.tag }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -am "zapret2: update to $TAG"
+          git push
+          gh workflow run build.yml --ref main

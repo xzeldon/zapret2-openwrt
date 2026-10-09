@@ -169,6 +169,25 @@ a GitHub release with the apks, their file names prefixed with the arch.
 
 To support another router, add an `openwrt`/`target` entry to the matrix.
 
+Only changes under `packages/`, the three scripts, `keys/` or `build.yml` itself start a
+build. Editing docs does not.
+
+### New zapret2 releases
+
+[`.github/workflows/upstream.yml`](.github/workflows/upstream.yml) checks the latest
+bol-van/zapret2 release every 6 hours. When it is newer than `PKG_VERSION`,
+`update-upstream.sh` points the Makefile at the release commit and resets `PKG_RELEASE`
+to 1. The workflow commits that to `main` and starts `build.yml`, and about 5 minutes
+later routers get the new version from `apk upgrade zapret2`. If upstream breaks the
+build, the run fails and Pages keeps serving the previous version.
+
+A push made with `GITHUB_TOKEN` does not trigger other workflows, which is why
+`upstream.yml` starts the build with `gh workflow run`. GitHub turns off scheduled
+workflows in a public repo after 60 days without commits. The bump commits count, so
+this only bites if upstream goes quiet for two months. Re-enable it in the Actions tab.
+
+To bump by hand, run `./update-upstream.sh` or `./update-upstream.sh v1.0.5.2` and commit.
+
 ### Signing key
 
 apk on OpenWrt 25.12 trusts a repository by the EC prime256v1 signature on its
@@ -191,6 +210,7 @@ packages/zapret2-presets/          presets and the zapret2-preset tool
 build.sh                           SDK -> packages -> repository directory
 index.sh                           packages.adb, its signature and SHA256SUMS
 site.sh                            GitHub Pages site from the built repositories
+update-upstream.sh                 moves the Makefile to the latest zapret2 release
 keys/zapret2-openwrt.pem           public key of the repository
 ```
 
