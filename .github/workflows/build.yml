@@ -1,0 +1,142 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      zapret2_tag:
+        description: 'bol-van/zapret2 tag to build, e.g. v1.0.5.2 (empty = version pinned in packages/zapret2/Makefile)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.openwrt }} ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        # one entry per router target; the package arch (e.g. aarch64_cortex-a53) comes from the SDK
+        include:
+          - openwrt: 25.12.5
+            target: mediatek/filogic
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache SDK and sources
+        uses: actions/cache@v6
+        with:
+          path: |
+            work/openwrt-sdk-*.tar.zst
+            work/dl
+          key: sdk-${{ matrix.openwrt }}-${{ matrix.target }}-${{ hashFiles('packages/*/Makefile') }}
+          restore-keys: sdk-${{ matrix.openwrt }}-${{ matrix.target }}-
+
+      # no secrets in this step: it compiles third-party sources
+      - name: Build
+        env:
+          OPENWRT_VER: ${{ matrix.openwrt }}
+          TARGET: ${{ matrix.target }}
+          ZAPRET2_TAG: ${{ inputs.zapret2_tag }}
+        run: ./build.sh
+
+      - name: Sign index
+        if: github.event_name != 'pull_request'
+        env:
+          APK_SIGN_KEY: ${{ secrets.APK_SIGN_KEY }}
+        run: |
+          [ -n "$APK_SIGN_KEY" ] || { echo "APK_SIGN_KEY secret is not set"; exit 1; }
+          umask 077
+          printf '%s\n' "$APK_SIGN_KEY" > "$RUNNER_TEMP/sign.pem"
+          for d in out/*/*/; do SIGN_KEY=$RUNNER_TEMP/sign.pem ./index.sh "$d"; done
+          rm -f "$RUNNER_TEMP/sign.pem"
+
+      - name: Artifact name
+        id: name
+        run: echo "name=repo-${{ matrix.openwrt }}-${TARGET//\//-}" >> "$GITHUB_OUTPUT"
+        env:
+          TARGET: ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.name.outputs.name }}
+          path: out/
+          if-no-files-found: error
+
+      - name: Build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: log-${{ steps.name.outputs.name }}
+          path: |
+            work/build.log
+            work/feeds.log
+          if-no-files-found: ignore
+
+  # the whole repository is redeployed every time: every target is rebuilt on each run
+  pages:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: repo-*
+          path: site
+          merge-multiple: true
+
+      - name: Site
+        run: ./site.sh site "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v5
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: repo-*
+          path: out
+          merge-multiple: true
+
+      # apk file names do not carry the arch, so prefix it for the flat release asset list
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir assets
+          for f in out/*/*/*.apk; do
+            arch=$(basename "$(dirname "$f")")
+            cp "$f" "assets/${arch}_$(basename "$f")"
+          done
+          (cd assets && sha256sum ./*.apk | sed 's| \./| |' > SHA256SUMS)
+          gh release create "$GITHUB_REF_NAME" assets/* -R "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" --generate-notes

@@ -1,0 +1,178 @@
+#!/bin/sh
+# zapret2-preset: list, show and apply ready-made zapret2 presets.
+# POSIX sh / busybox ash compatible.
+
+ZAPRET_BASE="${ZAPRET_BASE:-/opt/zapret2}"
+PRESETS_DIR="${PRESETS_DIR:-/opt/zapret2/presets}"
+INITD="${INITD:-/etc/init.d/zapret2}"
+
+usage() {
+	cat <<USAGE
+Usage:
+  zapret2-preset list
+  zapret2-preset show <name>
+  zapret2-preset apply <name> [--no-restart]
+
+apply backs up $ZAPRET_BASE/config and the user hostlist, writes the preset
+settings into config, installs the preset hostlist and restarts zapret2.
+USAGE
+}
+
+die() {
+	echo "zapret2-preset: $*" >&2
+	exit 1
+}
+
+check_name() {
+	case "$1" in
+	'' | *[!a-z0-9._-]* | .*) die "invalid preset name: '$1' (allowed: a-z 0-9 . _ -)" ;;
+	esac
+	[ -d "$PRESETS_DIR/$1" ] || die "no such preset: $1 (see: zapret2-preset list)"
+}
+
+cmd_list() {
+	[ -d "$PRESETS_DIR" ] || die "presets directory not found: $PRESETS_DIR"
+	for d in "$PRESETS_DIR"/*/; do
+		[ -d "$d" ] || continue
+		n=${d%/}
+		n=${n##*/}
+		t=
+		[ -f "$d/README.md" ] && t=$(head -n 1 "$d/README.md" | sed 's/\r$//; s/^#* *//')
+		printf '%-24s %s\n' "$n" "$t"
+	done
+}
+
+cmd_show() {
+	[ $# -eq 1 ] || { usage >&2; exit 2; }
+	check_name "$1"
+	[ -f "$PRESETS_DIR/$1/README.md" ] && cat "$PRESETS_DIR/$1/README.md"
+	echo
+	echo "----- preset.conf -----"
+	cat "$PRESETS_DIR/$1/preset.conf"
+}
+
+# set_key FILE KEY VALUE: replace first active KEY= line, else first commented
+# #KEY= line, else append. Value goes through the environment, so no escaping
+# problems with | & / or backslashes.
+set_key() {
+	SK_KEY=$2 SK_VAL=$3 awk '
+	BEGIN { k = ENVIRON["SK_KEY"]; v = ENVIRON["SK_VAL"]; pre = k "="; n = length(pre) }
+	{ line[NR] = $0 }
+	END {
+		hit = 0
+		for (i = 1; i <= NR; i++) if (substr(line[i], 1, n) == pre) { hit = i; break }
+		if (!hit) for (i = 1; i <= NR; i++) if (substr(line[i], 1, n + 1) == "#" pre) { hit = i; break }
+		for (i = 1; i <= NR; i++) print (i == hit) ? pre v : line[i]
+		if (!hit) print pre v
+	}' "$1" >"$1.new" && cat "$1.new" >"$1" && rm -f "$1.new"
+}
+
+# set_block FILE BLOCKFILE: replace the NFQWS2_OPT block (multi-line or
+# single-line) with the contents of BLOCKFILE, or append it if absent.
+set_block() {
+	SB_BLOCK=$2 awk '
+	BEGIN {
+		f = ENVIRON["SB_BLOCK"]; blk = ""
+		while ((getline l < f) > 0) blk = blk l "\n"
+		close(f)
+		pre = "NFQWS2_OPT=\""; done = 0; skip = 0
+	}
+	skip { if ($0 == "\"") skip = 0; next }
+	!done && substr($0, 1, length(pre)) == pre {
+		rest = substr($0, length(pre) + 1)
+		if (rest !~ /"[ \t]*$/) skip = 1
+		printf "%s", blk; done = 1; next
+	}
+	{ print }
+	END { if (!done) printf "%s", blk }
+	' "$1" >"$1.new" && cat "$1.new" >"$1" && rm -f "$1.new"
+}
+
+cmd_apply() {
+	name=
+	restart=1
+	for a in "$@"; do
+		case "$a" in
+		--no-restart) restart=0 ;;
+		-*) die "unknown option: $a" ;;
+		*) [ -z "$name" ] || die "too many arguments"; name=$a ;;
+		esac
+	done
+	[ -n "$name" ] || { usage >&2; exit 2; }
+	check_name "$name"
+	pdir="$PRESETS_DIR/$name"
+	[ -f "$pdir/preset.conf" ] || die "preset has no preset.conf: $name"
+	cfg="$ZAPRET_BASE/config"
+	[ -f "$cfg" ] || die "$cfg not found; is zapret2 installed?"
+	hl="$ZAPRET_BASE/ipset/zapret-hosts-user.txt"
+
+	tmp=$(mktemp -d "${TMPDIR:-/tmp}/zapret2-preset.XXXXXX") || die "cannot create temp dir"
+	trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+	# split preset.conf into simple KEY=VALUE lines and the NFQWS2_OPT block
+	: >"$tmp/simple"
+	: >"$tmp/block"
+	awk -v simple="$tmp/simple" -v block="$tmp/block" '
+	inb { print > block; if ($0 == "\"") inb = 0; next }
+	/^[ \t]*#/ || /^[ \t]*$/ { next }
+	$0 == "NFQWS2_OPT=\"" { inb = 1; print > block; next }
+	/^NFQWS2_OPT=/ { print > block; next }
+	{ print > simple }
+	' "$pdir/preset.conf"
+
+	# validate before touching anything
+	while IFS= read -r line; do
+		case "$line" in
+		*=*) ;;
+		*) die "bad line in preset.conf: $line" ;;
+		esac
+		case "${line%%=*}" in
+		'' | [0-9]* | *[!A-Za-z0-9_]*) die "bad key in preset.conf: ${line%%=*}" ;;
+		esac
+	done <"$tmp/simple"
+
+	stamp=$(date +%Y%m%d-%H%M%S)
+	cp -p "$cfg" "$cfg.bak-$stamp" || die "backup of config failed"
+	echo "Backup: $cfg.bak-$stamp"
+	hlbak=
+	if [ -f "$hl" ]; then
+		hlbak="$hl.bak-$stamp"
+		cp -p "$hl" "$hlbak" || die "backup of hostlist failed"
+		echo "Backup: $hlbak"
+	fi
+
+	cp "$cfg" "$tmp/config"
+	while IFS= read -r line; do
+		set_key "$tmp/config" "${line%%=*}" "${line#*=}"
+	done <"$tmp/simple"
+	[ -s "$tmp/block" ] && set_block "$tmp/config" "$tmp/block"
+	cat "$tmp/config" >"$cfg" || die "cannot write $cfg"
+	echo "Updated: $cfg"
+
+	if [ -f "$pdir/hosts.txt" ]; then
+		cat "$pdir/hosts.txt" >"$hl" || die "cannot write $hl"
+		echo "Installed hostlist: $hl"
+	fi
+
+	if [ "$restart" = 1 ]; then
+		"$INITD" enable || die "'$INITD enable' failed"
+		"$INITD" restart || die "'$INITD restart' failed"
+		echo "zapret2 enabled and restarted."
+	else
+		echo "Not restarted (--no-restart). Run: $INITD enable; $INITD restart"
+	fi
+
+	echo
+	echo "Preset '$name' applied. To roll back:"
+	echo "  cp $cfg.bak-$stamp $cfg"
+	[ -n "$hlbak" ] && echo "  cp $hlbak $hl"
+	echo "  $INITD restart"
+}
+
+case "${1:-}" in
+'' | -h | --help | help) usage ;;
+list) cmd_list ;;
+show) shift; cmd_show "$@" ;;
+apply) shift; cmd_apply "$@" ;;
+*) usage >&2; exit 2 ;;
+esac
