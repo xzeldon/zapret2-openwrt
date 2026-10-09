@@ -1,20 +1,24 @@
 # zapret2-openwrt
 
-OpenWrt apk packages of [bol-van/zapret2](https://github.com/bol-van/zapret2), built from
-the upstream sources with the official OpenWrt SDK, and a signed apk repository on GitHub
-Pages so a router installs them with `apk add`.
+OpenWrt packages of [bol-van/zapret2](https://github.com/bol-van/zapret2), built from
+upstream sources with the official OpenWrt SDK. GitHub Pages hosts them as a signed apk
+repository, so a router installs zapret2 with `apk add`. OpenWrt 25.12 or newer only,
+since older releases use opkg.
 
-- **Upstream as is.** The package installs the same tree `install_easy.sh` creates on
-  OpenWrt (`/opt/zapret2`, init script and iface hotplug hook as symlinks into it) and the
-  upstream `config.default`. It does nothing until you configure it.
-- **Two builds of the same package**: `zapret2` (nfqws2 linked against `luajit2`,
-  `libnetfilter-queue` etc. from the OpenWrt feeds) and `zapret2-static` (fully static
-  binaries, LuaJIT built in). Install one of them.
-- **Optional presets**: `zapret2-presets` ships ready-made, ISP-specific configurations
-  and a `zapret2-preset` tool. Nothing is applied unless you run it.
-- Only OpenWrt 25.12+ (apk). Dependencies come from the official OpenWrt repositories.
+There are three packages.
 
-[Русская документация](docs/ru.md)
+| Package | What it is |
+|---|---|
+| `zapret2` | nfqws2 linked against `luajit2`, `libnetfilter-queue` and friends from the official OpenWrt repositories |
+| `zapret2-static` | the same, with static binaries and LuaJIT built in. On the router it needs only `nftables`, `kmod-nft-queue` and `curl` |
+| `zapret2-presets` | ready-made configs for specific ISPs and the `zapret2-preset` tool |
+
+`zapret2` and `zapret2-static` conflict, so install one. Both lay out the upstream tree in
+`/opt/zapret2` exactly as upstream `install_easy.sh` does, with `/etc/init.d/zapret2` and
+the iface hotplug hook as symlinks into it. They ship the upstream `config.default`
+unchanged, which has `NFQWS2_ENABLE=0`, so nothing happens until you configure it.
+
+[Документация на русском](docs/ru.md)
 
 ## Install on the router
 
@@ -27,22 +31,42 @@ apk update
 apk add zapret2        # or: apk add zapret2-static
 ```
 
-The repository path is `<OpenWrt release branch>/<package arch>`. Use `/etc/apk/arch`, not
-`apk --print-arch`: the latter prints `aarch64` instead of `aarch64_cortex-a53`.
-See the [repository page](https://xzeldon.github.io/zapret2-openwrt/) for the
-releases and archs currently built.
+The feed path is `<release branch>/<package arch>`, for example `25.12/aarch64_cortex-a53`.
+Take the arch from `/etc/apk/arch`. On OpenWrt `apk --print-arch` prints `aarch64`, and
+no such directory exists. The [repository page](https://xzeldon.github.io/zapret2-openwrt/)
+lists the branches and archs that CI builds.
 
-Then configure `/opt/zapret2/config` as described in the
-[upstream docs](https://github.com/bol-van/zapret2/tree/master/docs), and run
-`/etc/init.d/zapret2 enable && /etc/init.d/zapret2 restart`.
+apk trusts the repository because the key signs `packages.adb`. Without the key you get
+`UNTRUSTED signature`. Add `/etc/apk/keys/zapret2-openwrt.pem` to `/etc/sysupgrade.conf`
+if you want the key to survive a sysupgrade.
 
-Updating: `apk update && apk upgrade zapret2`. `/opt/zapret2/config` and the user lists in
-`/opt/zapret2/ipset/` are conffiles and are kept. Do not run a plain `apk upgrade` of the
-whole system on OpenWrt.
+Next, edit `/opt/zapret2/config` following the
+[upstream docs](https://github.com/bol-van/zapret2/tree/master/docs), or apply a preset,
+and run `/etc/init.d/zapret2 enable && /etc/init.d/zapret2 restart`.
 
-Switching between `zapret2` and `zapret2-static`: they conflict, so remove one first
-(`apk del zapret2 && apk add zapret2-static`); back up `/opt/zapret2/config` and
-`/opt/zapret2/ipset/*.txt` before that.
+### Updates
+
+```sh
+apk update && apk upgrade zapret2
+```
+
+`/opt/zapret2/config` and the user lists in `/opt/zapret2/ipset/` are conffiles, so an
+upgrade keeps your edits. Upgrade zapret2 by name. A plain `apk upgrade` of the whole
+system is a bad idea on OpenWrt.
+
+If you installed zapret2 earlier from a local `.apk` file, apk pins it to that file, and
+`apk add zapret2` keeps the local build even after you add the feed. Back up the config,
+then run `apk del zapret2 && apk add zapret2` and copy the config back.
+
+### Switching between zapret2 and zapret2-static
+
+They conflict, so remove one before adding the other. Back up the config first.
+
+```sh
+tar -czf /tmp/zapret2-conf.tgz /opt/zapret2/config /opt/zapret2/ipset/*.txt
+apk del zapret2 && apk add zapret2-static
+tar -xzf /tmp/zapret2-conf.tgz -C / && /etc/init.d/zapret2 restart
+```
 
 ## Presets
 
@@ -53,71 +77,103 @@ zapret2-preset show vn-fpt-steam
 zapret2-preset apply vn-fpt-steam       # backs up config and hostlist, then restarts zapret2
 ```
 
-| Preset | What |
+| Preset | For |
 |---|---|
 | [`vn-fpt-steam`](packages/zapret2-presets/files/presets/vn-fpt-steam/README.md) | Steam in Vietnam on FPT Telecom |
 
-A preset is a directory in
-[`packages/zapret2-presets/files/presets/`](packages/zapret2-presets/files/presets/) with
-`README.md` (first line is the title; say which ISP, where and when it was verified),
-`preset.conf` (`KEY=VALUE` lines and an optional multi-line `NFQWS2_OPT="…"` block) and an
-optional `hosts.txt`. DPI differs between ISPs, so a preset is only known to work where
-its README says. PRs with new verified presets are welcome; bump `PKG_VERSION` in
-`packages/zapret2-presets/Makefile`.
+Installing the package changes nothing. Only `apply` touches the config. It backs up
+`config` and `ipset/zapret-hosts-user.txt` to `*.bak-<timestamp>`, writes the preset
+settings, installs the preset hostlist, restarts the service and prints the commands to
+roll back.
+
+DPI differs from one ISP to the next, so trust a preset only where its README says it was
+tested. A preset is a directory in
+[`packages/zapret2-presets/files/presets/`](packages/zapret2-presets/files/presets/)
+with three files.
+
+- `README.md`. The first line is the title. Say which ISP, where and when you tested it.
+- `preset.conf`. `KEY=VALUE` lines and an optional multi-line `NFQWS2_OPT="…"` block.
+- `hosts.txt`, optional. It becomes the user hostlist.
+
+PRs with new tested presets are welcome. Bump `PKG_VERSION` in
+`packages/zapret2-presets/Makefile` when you add one.
 
 ## Build locally
 
-Needs Linux x86_64 (tested on Ubuntu 26.04) with about 3 GB free, run as a normal user
-with sudo (only for `apt-get`).
+You need Linux x86_64 and about 3 GB of free disk. I test on Ubuntu 26.04. Run it as a
+normal user. The script uses sudo only for `apt-get`.
 
 ```sh
 git clone https://github.com/xzeldon/zapret2-openwrt && cd zapret2-openwrt
 ./build.sh                                   # all packages, default target
 ```
 
-| Variable | Default | |
+A first run takes about 2.5 minutes on 4 cores, plus the SDK download. Later runs reuse
+the unpacked SDK.
+
+| Variable | Default | Meaning |
 |---|---|---|
 | `OPENWRT_VER` | `25.12.5` | OpenWrt release of the SDK |
-| `TARGET` | `mediatek/filogic` | router target, see `ubus call system board` on the router |
+| `TARGET` | `mediatek/filogic` | router target, `ubus call system board` on the router shows it |
 | `PACKAGES` | `zapret2 zapret2-static zapret2-presets` | what to build |
-| `ZAPRET2_TAG` | (pinned in the Makefile) | build another upstream tag, e.g. `v1.0.5.2` |
-| `SIGN_KEY` | — | EC private key; without it the index is unsigned |
+| `ZAPRET2_TAG` | the version pinned in the Makefile | another upstream tag, e.g. `v1.0.5.2` |
+| `SIGN_KEY` | unset | EC private key. Without it the index stays unsigned |
 | `WORKDIR`, `OUTDIR`, `DLDIR` | `work/`, `out/`, `work/dl` | |
 | `INSTALL_HOST_DEPS` | `1` | `0` skips `apt-get` |
 
-The result is a ready repository directory, e.g. `out/25.12/aarch64_cortex-a53/` with the
-apks, `packages.adb` and `SHA256SUMS`. To try an apk without a repository:
-`apk add --allow-untrusted ./zapret2-*.apk` on the router.
+The output is a ready repository directory such as `out/25.12/aarch64_cortex-a53/`, with
+the apks, `packages.adb` and `SHA256SUMS`. To try a single apk without a repository, copy
+it to the router and run `apk add --allow-untrusted ./zapret2-*.apk`.
 
-What `build.sh` does:
+### What build.sh does
 
-1. Downloads the SDK for `OPENWRT_VER`/`TARGET`, checks it against the release
-   `sha256sums`, unpacks it to `work/sdk-<ver>-<target>` (reused on later runs).
-2. Uses only the `base` and `packages` feeds plus `packages/` of this repo as feed
-   `zapret2`, and installs from them only the packages zapret2 needs.
-3. Turns off the SDK default of building everything (`CONFIG_ALL*`), selects one package
-   and builds it; the two variants conflict, so they are built one after another.
-4. Checks that `nfqws2` in each apk is dynamic or static as expected, then runs
-   `index.sh` to write `packages.adb` (signed when `SIGN_KEY` is set) and `SHA256SUMS`.
+1. Downloads the SDK for `OPENWRT_VER` and `TARGET`, checks it against the release
+   `sha256sums` and unpacks it to `work/sdk-<ver>-<target>`.
+2. Writes a `feeds.conf` with only the `base` and `packages` feeds, plus this repo's
+   `packages/` as the feed `zapret2`. Then it installs our packages and what they need
+   to compile.
+3. Turns off `CONFIG_ALL*`. The SDK sets them by default and then builds every package
+   in the feeds, `linux-firmware` included.
+4. Builds the variants one at a time, because they conflict.
+5. Opens each apk and checks that `nfqws2` is dynamic or static as it should be.
+6. Runs `index.sh`, which writes `packages.adb` and `SHA256SUMS` and signs the index
+   when `SIGN_KEY` is set. It then reads the index back with only the public key, the
+   way a router would.
 
-## CI and the repository
+### Why the build is small
 
-[`.github/workflows/build.yml`](.github/workflows/build.yml) runs `build.sh` for every
-entry of its target matrix on each push, PR and manual run (a manual run can take another
-upstream tag).
+`nfqws2` links against `libnetfilter-queue`, `libmnl`, `zlib` and `luajit2`. Those stay in
+`DEPENDS`. The SDK builds them, and their metadata gives the ABI suffix, so the apk
+depends on `libnetfilter-queue1` and not on `libnetfilter-queue`.
 
-- On `main`, the index is signed with the `APK_SIGN_KEY` secret in a separate step, so
-  the key is never present while third-party sources are compiled. Then the
-  whole site is rebuilt and deployed to GitHub Pages with `site.sh`. PRs only build.
-- A `v*` tag also creates a GitHub release with the apks (file names prefixed with the arch).
+`nftables`, `kmod-nft-queue` and `curl` only run on the router. They go in
+`EXTRA_DEPENDS`, which writes them into the apk metadata without building them. Building
+them took about 85% of the CPU time: kernel modules, mbedtls, curl and nftables. With
+`EXTRA_DEPENDS` only 8 feed packages end up in the SDK tree, and the SDK takes 1.6 GB
+after a build. apk on 25.12 requires a version constraint in `EXTRA_DEPENDS`, so they
+read `nftables (>=0)` and so on.
 
-Adding a router target means adding one `openwrt`/`target` entry to the matrix.
+`libcap` is a build-only dependency. nfqws2 needs its `sys/capability.h` header, while
+`capget` and `capset` come from musl.
+
+## CI and the Pages repository
+
+[`.github/workflows/build.yml`](.github/workflows/build.yml) runs `build.sh` for each
+entry of its `openwrt`/`target` matrix. It runs on every push and PR, and you can start it
+by hand with another upstream tag. A run takes about 4 minutes.
+
+On `main` a separate step signs the index with the `APK_SIGN_KEY` secret. The build step
+compiles third-party code and never sees the key. After that `site.sh` rebuilds the whole
+site and the workflow deploys it to GitHub Pages. PRs only build. A `v*` tag also creates
+a GitHub release with the apks, their file names prefixed with the arch.
+
+To support another router, add an `openwrt`/`target` entry to the matrix.
 
 ### Signing key
 
-apk on OpenWrt 25.12 trusts a repository by the signature of its `packages.adb`
-(EC prime256v1). The public key is [`keys/zapret2-openwrt.pem`](keys/zapret2-openwrt.pem);
-the private key is the `APK_SIGN_KEY` secret. To create a new pair:
+apk on OpenWrt 25.12 trusts a repository by the EC prime256v1 signature on its
+`packages.adb`. The public half is [`keys/zapret2-openwrt.pem`](keys/zapret2-openwrt.pem),
+the private half is the `APK_SIGN_KEY` secret. To make a new pair:
 
 ```sh
 openssl ecparam -name prime256v1 -genkey -noout -out zapret2-openwrt-apk-sign.pem
@@ -125,7 +181,7 @@ openssl ec -in zapret2-openwrt-apk-sign.pem -pubout -out keys/zapret2-openwrt.pe
 gh secret set APK_SIGN_KEY < zapret2-openwrt-apk-sign.pem
 ```
 
-Routers that already have the old public key must download the new one.
+Every router with the old public key has to download the new one.
 
 ## Layout
 
@@ -133,11 +189,11 @@ Routers that already have the old public key must download the new one.
 packages/zapret2/Makefile          zapret2 and zapret2-static
 packages/zapret2-presets/          presets and the zapret2-preset tool
 build.sh                           SDK -> packages -> repository directory
-index.sh                           packages.adb (+ signature) and SHA256SUMS
+index.sh                           packages.adb, its signature and SHA256SUMS
 site.sh                            GitHub Pages site from the built repositories
 keys/zapret2-openwrt.pem           public key of the repository
 ```
 
 ## License
 
-The packaging in this repository is MIT. zapret2 itself is MIT, by bol-van.
+The packaging here is MIT. zapret2 itself is MIT, by bol-van.

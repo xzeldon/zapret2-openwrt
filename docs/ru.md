@@ -1,20 +1,22 @@
-# zapret2 для OpenWrt: установка, настройка, сборка
+# zapret2 для OpenWrt
 
 Пакеты [bol-van/zapret2](https://github.com/bol-van/zapret2), собранные из апстримных
-исходников официальным OpenWrt SDK, и подписанный apk-репозиторий на GitHub Pages.
-Только OpenWrt 25.12+ (apk).
+исходников официальным OpenWrt SDK. Они лежат в подписанном apk-репозитории на GitHub
+Pages, и роутер ставит их обычным `apk add`. Подходит только OpenWrt 25.12 и новее,
+старые релизы работают на opkg.
 
-| Пакет | Что внутри |
+| Пакет | Что это |
 |---|---|
-| `zapret2` | nfqws2 динамический, `luajit2`, `libnetfilter-queue` и пр. ставятся из официальных репозиториев OpenWrt |
-| `zapret2-static` | статические бинарники (musl, LuaJIT внутри), на роутере нужны только `nftables`, `kmod-nft-queue`, `curl` |
-| `zapret2-presets` | готовые сценарии под конкретных провайдеров и утилита `zapret2-preset` |
+| `zapret2` | nfqws2 с динамической линковкой. `luajit2`, `libnetfilter-queue` и остальное ставятся из официальных репозиториев OpenWrt |
+| `zapret2-static` | то же со статическими бинарниками, LuaJIT внутри. На роутере нужны только `nftables`, `kmod-nft-queue` и `curl` |
+| `zapret2-presets` | готовые конфиги под конкретных провайдеров и утилита `zapret2-preset` |
 
 `zapret2` и `zapret2-static` конфликтуют, ставится один из них. Оба раскладывают
-апстримное дерево в `/opt/zapret2` так же, как `install_easy.sh`, и **ничего не делают**
-после установки: в апстримном `config` стоит `NFQWS2_ENABLE=0`.
+апстримное дерево в `/opt/zapret2` так же, как это делает `install_easy.sh`.
+`/etc/init.d/zapret2` и hotplug-хук сделаны симлинками внутрь этого дерева. Конфиг
+апстримный, в нём `NFQWS2_ENABLE=0`, так что после установки zapret2 ничего не делает.
 
-## 1. Подключить репозиторий
+## Подключить репозиторий
 
 ```sh
 wget -O /etc/apk/keys/zapret2-openwrt.pem https://xzeldon.github.io/zapret2-openwrt/zapret2-openwrt.pem
@@ -25,16 +27,22 @@ apk update
 apk add zapret2                 # или zapret2-static
 ```
 
-- Архитектуру берём из `/etc/apk/arch`. `apk --print-arch` на OpenWrt печатает `aarch64`
-  вместо `aarch64_cortex-a53`, и путь не найдётся.
-- apk доверяет репозиторию по подписи `packages.adb`, поэтому ключ обязателен.
-  Без ключа будет `UNTRUSTED signature`.
-- Какие ветки и архитектуры собираются, видно на
-  [странице репозитория](https://xzeldon.github.io/zapret2-openwrt/).
-- После установки postinst OpenWrt сам запускает сервис. С апстримным конфигом это
-  создаёт пустую nft-таблицу `inet zapret2` и трафик не трогает.
+Архитектуру берём из `/etc/apk/arch`. `apk --print-arch` на OpenWrt печатает `aarch64`
+вместо `aarch64_cortex-a53`, и такого каталога в репозитории нет. Какие ветки и
+архитектуры собирает CI, видно на [странице репозитория](https://xzeldon.github.io/zapret2-openwrt/).
 
-## 2. Настроить
+apk верит репозиторию по подписи `packages.adb`, поэтому без ключа будет
+`UNTRUSTED signature`. Чтобы ключ пережил sysupgrade, допишите
+`/etc/apk/keys/zapret2-openwrt.pem` в `/etc/sysupgrade.conf`.
+
+После установки OpenWrt сам запускает сервис. С апстримным конфигом это создаёт пустую
+nft-таблицу `inet zapret2`, трафик не затрагивается.
+
+Если zapret2 раньше ставился из локального `.apk`, apk привязал его к этому файлу. Тогда
+`apk add zapret2` оставит локальную сборку даже с подключённым репозиторием. Сохраните
+конфиг, выполните `apk del zapret2 && apk add zapret2` и верните конфиг на место.
+
+## Настроить
 
 ### Пресетом
 
@@ -45,18 +53,19 @@ zapret2-preset show vn-fpt-steam        # README пресета и что име
 zapret2-preset apply vn-fpt-steam
 ```
 
-`apply` делает бэкап `config` и `ipset/zapret-hosts-user.txt` (`*.bak-<дата>`),
-выставляет параметры, кладёт список доменов, делает `enable` и `restart`. В конце
-печатает команды для отката.
+Сама установка пакета ничего не меняет, конфиг трогает только `apply`. Он сохраняет
+`config` и `ipset/zapret-hosts-user.txt` в `*.bak-<дата>`, выставляет параметры, кладёт
+список доменов и делает `enable` и `restart`. В конце печатает команды для отката.
 
-Пресет привязан к провайдеру: DPI у разных провайдеров разный. Где и когда пресет
-проверен, написано в его README.
+DPI у провайдеров разный, и пресет точно работает только там, где его проверили. Где и
+когда это было, написано в его README.
 
 ### Вручную
 
-Конфиг `/opt/zapret2/config`, домены `/opt/zapret2/ipset/zapret-hosts-user.txt`.
-Описание параметров есть в [апстримной документации](https://github.com/bol-van/zapret2/tree/master/docs).
-Минимальный сценарий «трогать только домены из списка»:
+Конфиг лежит в `/opt/zapret2/config`, список доменов в
+`/opt/zapret2/ipset/zapret-hosts-user.txt`. Параметры описаны в
+[апстримной документации](https://github.com/bol-van/zapret2/tree/master/docs).
+Вот минимальная настройка, при которой zapret2 трогает только домены из списка:
 
 ```sh
 C=/opt/zapret2/config
@@ -78,41 +87,43 @@ EOF
 /etc/init.d/zapret2 restart
 ```
 
-Если на WAN нет IPv6: `set_cfg DISABLE_IPV6 1`.
+Если на WAN нет IPv6, добавьте `set_cfg DISABLE_IPV6 1`.
 
 ### DNS
 
-Обход DPI бесполезен, если DNS провайдера отдаёт заглушку. Во Вьетнаме, например, Steam
-резолвится в `127.0.0.1`. Нужен шифрованный DNS на роутере: stubby или https-dns-proxy, в
-dnsmasq `noresolv=1` (LuCI: Network → DNS → Resolv & Hosts Files → Ignore resolv file).
-Проверка с ПК: `nslookup store.steampowered.com` должен вернуть реальный адрес.
+Если DNS провайдера отдаёт заглушку, обход DPI не поможет. Во Вьетнаме, например, Steam
+резолвится в `127.0.0.1`. Поднимите на роутере шифрованный DNS, stubby или
+https-dns-proxy, и включите в dnsmasq `noresolv=1`. В LuCI это Network → DNS →
+Resolv & Hosts Files → Ignore resolv file. Проверка с ПК: `nslookup store.steampowered.com`
+должен вернуть настоящий адрес.
 
-## 3. Проверить
+## Проверить
 
 ```sh
 pgrep -af nfqws2                         # в аргументах --hostlist=/opt/zapret2/ipset/zapret-hosts-user.txt
 nft list table inet zapret2 | grep queue # только нужные порты, "ct original packets 1-N", "queue flags bypass"
 ```
 
-С ПК делаем `curl` на заблокированные адреса. Должен прийти HTTP-код, а не `000`
-(connection reset).
+С ПК запросите `curl`-ом заблокированные адреса. Должен прийти HTTP-код. `000` означает,
+что соединение сбросили.
 
-Нагрузка: на Cudy TR3000 (MT7981B, 2×A53) при скачивании 100 MB CPU роутера был загружен
-на 5–6 % и с zapret2, и без него. В очередь попадают только первые пакеты соединений с
-нужными портами, остальной трафик идёт мимо.
+Нагрузка почти нулевая. На Cudy TR3000 (MT7981B, 2×A53) скачивание 100 MB грузило CPU
+роутера на 5-6 % что с zapret2, что без него. В очередь nfqws2 попадают только первые
+пакеты соединений на нужные порты, остальной трафик идёт мимо.
 
-## 4. Отладка
+## Отладка
 
 | Симптом | Что делать |
 |---|---|
-| Снова не открывается | Проверить DNS. `grep -i <домен> /opt/zapret2/ipset/zapret-hosts-user-exclude.txt` должен ничего не выводить. Дальше blockcheck2 |
-| Часть сервиса работает, часть нет | Не хватает доменов в `zapret-hosts-user.txt`. Добавить их и сделать `restart` |
-| Нужен подробный лог | `--debug=@/tmp/nfqws2.log` в начало `NFQWS2_OPT`, `restart`. В логе есть `hostlist check … positive/negative` и что отправлено. После отладки убрать |
-| Сломался интернет | `/etc/init.d/zapret2 stop`: таблица удаляется. Если демон упал, `queue … bypass` пропускает пакеты |
+| Снова не открывается | Проверить DNS. `grep -i <домен> /opt/zapret2/ipset/zapret-hosts-user-exclude.txt` должен ничего не выводить. Если всё чисто, запустить blockcheck2 |
+| Часть сервиса работает, часть нет | В `zapret-hosts-user.txt` не хватает доменов. Добавить их и сделать `restart` |
+| Нужен подробный лог | Поставить `--debug=@/tmp/nfqws2.log` в начало `NFQWS2_OPT` и сделать `restart`. В логе видно `hostlist check … positive/negative` и что ушло в сеть. После отладки убрать |
+| Пропал интернет | `/etc/init.d/zapret2 stop` удаляет таблицу. Если демон упал сам, правило `queue … bypass` пропустит пакеты мимо него |
 
-### Провайдер поменял DPI: blockcheck2
+### Провайдер поменял DPI
 
-Сервис нужно остановить, иначе он мешает тесту. На OpenWrt нет `nohup`, поэтому фон через `( … & )`:
+Подобрать новую стратегию поможет blockcheck2. Сервис на время теста остановите, иначе он
+мешает. `nohup` на OpenWrt нет, поэтому в фон запускаем через `( … & )`:
 
 ```sh
 /etc/init.d/zapret2 stop
@@ -123,21 +134,25 @@ cd /opt/zapret2
 grep -B1 AVAILABLE /tmp/blockcheck2.log | grep '^- '
 ```
 
-- Ждать конца не обязательно. Остановить можно так: `kill $(pgrep -f "[b]lockcheck2.sh")`.
-  На SIGTERM он убирает свою nft-таблицу, а на SIGINT в batch-режиме не реагирует.
-- blockcheck делает одну попытку на вариант, и `AVAILABLE` может срабатывать лишь в 70 %
-  случаев. Поэтому 2–3 кандидата стоит проверить по 20 запросов и выбрать лучший.
-- Начинать лучше с простого. Если DPI не собирает TCP-сегменты, хватает
-  `multisplit:pos=1,midsld`.
+Ждать конца теста не обязательно. Как наберётся несколько `AVAILABLE`, остановите его
+командой `kill $(pgrep -f "[b]lockcheck2.sh")`. На SIGTERM он убирает свою nft-таблицу, а
+SIGINT в batch-режиме игнорирует.
 
-## 5. Обновление и удаление
+Одной отметке `AVAILABLE` верить не стоит. blockcheck пробует каждый вариант один раз, а
+стратегия может срабатывать в 70 % случаев. Прогоните 2-3 кандидата по 20 запросов и
+возьмите лучший.
+
+Начинайте с простого. Если DPI не собирает TCP-сегменты, хватает
+`multisplit:pos=1,midsld`.
+
+## Обновить или удалить
 
 ```sh
-apk update && apk upgrade zapret2         # config и списки — conffiles, сохраняются
-diff /opt/zapret2/config.default /opt/zapret2/config   # есть ли новые параметры в апстриме
+apk update && apk upgrade zapret2         # config и списки это conffiles, они сохранятся
+diff /opt/zapret2/config.default /opt/zapret2/config   # появились ли в апстриме новые параметры
 ```
 
-Общий `apk upgrade` на OpenWrt делать не стоит.
+Обновляйте zapret2 по имени. Общий `apk upgrade` на OpenWrt лучше не запускать.
 
 Переход между `zapret2` и `zapret2-static`:
 
@@ -155,8 +170,9 @@ apk del zapret2 zapret2-static zapret2-presets
 rm -rf /opt/zapret2
 ```
 
-Если стоял `zapret2` из remittor/zapret-openwrt (UCI-конфиг `/etc/config/zapret2`,
-`luci-app-zapret2`), его нужно сначала удалить: пакеты называются одинаково, но несовместимы.
+`zapret2` из remittor/zapret-openwrt с UCI-конфигом `/etc/config/zapret2` и
+`luci-app-zapret2` сначала нужно удалить. Пакеты называются одинаково, но устроены
+по-разному.
 
 ```sh
 /etc/init.d/zapret2 stop; /etc/init.d/zapret2 disable
@@ -165,12 +181,12 @@ rm -rf /opt/zapret2 /etc/config/zapret2 /etc/init.d/zapret2 /etc/hotplug.d/iface
 nft list tables | grep -q zapret2 && nft delete table inet zapret2
 ```
 
-## 6. Сборка
+## Собрать
 
 ### Локально
 
-Нужен Linux x86_64 (проверено на Ubuntu 26.04), около 3 ГБ свободного места, обычный
-пользователь с sudo (sudo только для `apt-get`).
+Нужен Linux x86_64 и около 3 ГБ свободного места. Я проверял на Ubuntu 26.04. Запускайте
+от обычного пользователя, sudo скрипт берёт только для `apt-get`.
 
 ```sh
 git clone https://github.com/xzeldon/zapret2-openwrt && cd zapret2-openwrt
@@ -181,53 +197,61 @@ ZAPRET2_TAG=v1.0.5.2 ./build.sh                   # другой тег апст
 SIGN_KEY=~/key.pem ./build.sh                     # подписать индекс
 ```
 
-Результат — готовый каталог репозитория `out/<ветка>/<arch>/`. В нём apk,
-`packages.adb` и `SHA256SUMS`. Без `SIGN_KEY` индекс не подписан. Отдельный apk можно
-поставить на роутер напрямую: `scp -O` (в dropbear нет sftp), затем
-`apk add --allow-untrusted /tmp/zapret2-*.apk`.
+Первый запуск на 4 ядрах идёт около 2,5 минут плюс скачивание SDK. Дальше распакованный
+SDK переиспользуется.
 
-Target роутера смотрим на нём: `ubus call system board | grep target`.
+На выходе получается готовый каталог репозитория `out/<ветка>/<arch>/` с apk,
+`packages.adb` и `SHA256SUMS`. Без `SIGN_KEY` индекс не подписан. Отдельный apk можно
+поставить на роутер напрямую. Скопируйте его через `scp -O`, потому что в dropbear нет
+sftp, и выполните `apk add --allow-untrusted /tmp/zapret2-*.apk`.
+
+Target роутера показывает `ubus call system board | grep target` на самом роутере.
 
 ### В GitHub Actions
 
-`.github/workflows/build.yml` собирает каждую запись матрицы (`openwrt` + `target`).
-- Сборка запускается на push, на PR и вручную; при ручном запуске можно указать тег апстрима.
-- На `main` индекс подписывается секретом `APK_SIGN_KEY` в отдельном шаге: во время
-  компиляции стороннего кода ключа в окружении нет. Потом сайт пересобирается и
-  выкладывается на Pages.
-- Тег `v*` дополнительно создаёт GitHub Release с apk.
+`.github/workflows/build.yml` собирает каждую запись матрицы `openwrt` + `target`. Сборка
+идёт на каждый push и PR, а вручную можно запустить её с другим тегом апстрима. Прогон
+занимает около 4 минут.
+
+На `main` индекс подписывает отдельный шаг секретом `APK_SIGN_KEY`. Шаг сборки
+компилирует чужой код и ключа не видит. Потом `site.sh` пересобирает сайт, и workflow
+выкладывает его на Pages. Тег `v*` вдобавок создаёт GitHub Release с apk.
 
 ### Как устроен пакет
 
-- Исходники берутся git'ом с фиксированного коммита (`PKG_SOURCE_VERSION` в
-  `packages/zapret2/Makefile`). Собираются `nfqws2`, `mdig`, `ip2net` апстримными Makefile.
-- Варианты сделаны механизмом `VARIANT` OpenWrt. Статика собирается с `-static`
-  вместо `-pie` (`LDFLAGS_PIE=`) и с `-lgcc_eh`: без него на arm64 не линкуется
-  раскрутка стека LuaJIT. LuaJIT для статики берётся из `openresty/luajit2`, тег
-  закреплён в Makefile.
-- `CFLAGS`/`LDFLAGS` передаются через окружение, а не аргументами make. Апстрим
-  делает `CFLAGS += …`, и аргумент командной строки перекрыл бы это.
-- Зависимости делятся на два вида:
-  - `DEPENDS` — только библиотеки, с которыми линкуется `nfqws2`. Без них не
-    собрать. Кроме того, из их метаданных берётся ABI-суффикс: в apk попадает
-    `libnetfilter-queue1`, а не `libnetfilter-queue`.
-  - `EXTRA_DEPENDS` — то, что нужно только на роутере: `nftables`, `kmod-nft-queue`,
-    `curl`. Они просто дописываются в метаданные apk и в SDK не собираются, а это
-    около 85 % времени сборки (kmod-ы ядра, mbedtls, curl, nftables). apk в 25.12
-    требует для `EXTRA_DEPENDS` ограничение версии, поэтому стоит `(>=0)`.
-- `libcap` нужен только при сборке ради заголовка `sys/capability.h`. `capget`/`capset`
-  берутся из musl, поэтому на роутере libcap не нужен.
-- Conffiles: `/opt/zapret2/config` и пользовательские списки в `/opt/zapret2/ipset/`.
+Исходники берутся git'ом с закреплённого коммита, это `PKG_SOURCE_VERSION` в
+`packages/zapret2/Makefile`. `nfqws2`, `mdig` и `ip2net` собираются апстримными Makefile.
+
+Варианты сделаны механизмом `VARIANT` OpenWrt. Статика собирается с `-static` вместо
+`-pie` (`LDFLAGS_PIE=`) и с `-lgcc_eh`, иначе на arm64 не линкуется раскрутка стека
+LuaJIT. LuaJIT для статики берётся из `openresty/luajit2`, тег закреплён в Makefile.
+
+`CFLAGS` и `LDFLAGS` уходят в make через окружение, а не аргументами. Апстрим делает
+`CFLAGS += …`, и аргумент командной строки это бы перекрыл.
+
+Зависимости разделены на два вида, и от этого сильно зависит время сборки.
+- В `DEPENDS` только библиотеки, с которыми линкуется `nfqws2`. Без них не собрать. Из
+  их метаданных SDK берёт ABI-суффикс, поэтому в apk попадает `libnetfilter-queue1`, а
+  не `libnetfilter-queue`.
+- В `EXTRA_DEPENDS` то, что нужно только на роутере: `nftables`, `kmod-nft-queue`,
+  `curl`. Они просто дописываются в метаданные apk, и SDK их не собирает. Раньше на них
+  уходило около 85 % процессорного времени сборки: модули ядра, mbedtls, curl, nftables.
+  apk в 25.12 требует в `EXTRA_DEPENDS` ограничение версии, поэтому там стоит `(>=0)`.
+
+`libcap` нужен только при сборке, ради заголовка `sys/capability.h`. `capget` и `capset`
+есть в musl, так что на роутере libcap не нужен.
+
+Conffiles: `/opt/zapret2/config` и пользовательские списки в `/opt/zapret2/ipset/`.
 
 ### Грабли
 
-| Симптом | Причина / решение |
+| Симптом | Причина и решение |
 |---|---|
-| `fatal error: sys/capability.h` | в фидах нет `libcap`; он в `PKG_BUILD_DEPENDS`, `feeds install -p zapret2 -a` ставит его сам |
-| SDK собирает linux-firmware, все kmod и занимает 8+ ГБ | по умолчанию в SDK `CONFIG_ALL*=y`, `build.sh` их выключает |
-| `feeds install` тянет openldap, python3, bluez… | так `feeds install` обходит необязательные зависимости пакетов из `DEPENDS`; поэтому то, что нужно только на роутере, вынесено в `EXTRA_DEPENDS` |
-| `No feed for package 'zlib'` | в `feeds.conf` нет `base`: в SDK 25.12 строка начинается с `src-git --root=package base` |
-| `recursive dependency detected!`, `WARNING: … does not exist` при `defconfig` | особенности SDK, не ошибка |
-| `Error 1 (ignored)` в логе | не ошибка; падение — это `failed to build` |
-| `bad interpreter: /bin/bash^M` | скрипт с CRLF (правился на Windows), `sed -i 's/\r$//'` |
-| busybox `sha256sum -c` пишет `FAILED` про файлы, которых нет | проверять только скопированные: `grep <имя> SHA256SUMS \| sha256sum -c -` |
+| `fatal error: sys/capability.h` | В дереве SDK нет `libcap`. Он прописан в `PKG_BUILD_DEPENDS`, и `feeds install -p zapret2 -a` ставит его сам |
+| SDK собирает linux-firmware и все kmod, занимает 8+ ГБ | В SDK по умолчанию `CONFIG_ALL*=y`. `build.sh` их выключает |
+| `feeds install` тянет openldap, python3, bluez… | `feeds install` обходит и необязательные зависимости пакетов из `DEPENDS`. Поэтому всё, что нужно только на роутере, вынесено в `EXTRA_DEPENDS` |
+| `No feed for package 'zlib'` | В `feeds.conf` нет `base`. В SDK 25.12 эта строка начинается с `src-git --root=package base` |
+| `recursive dependency detected!`, `WARNING: … does not exist` при `defconfig` | Так ведёт себя SDK, это не ошибка |
+| `Error 1 (ignored)` в логе | Тоже не ошибка. Настоящее падение выглядит как `failed to build` |
+| `bad interpreter: /bin/bash^M` | Скрипт сохранили с CRLF на Windows. Поможет `sed -i 's/\r$//'` |
+| busybox `sha256sum -c` пишет `FAILED` про файлы, которых нет | Проверяйте только скопированные: `grep <имя> SHA256SUMS \| sha256sum -c -` |
