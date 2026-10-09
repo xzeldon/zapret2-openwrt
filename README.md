@@ -47,12 +47,20 @@ and run `/etc/init.d/zapret2 enable && /etc/init.d/zapret2 restart`.
 ### Updates
 
 ```sh
-apk update && apk upgrade zapret2
+apk update
+apk list -u | grep zapret       # empty output means nothing to update
+apk upgrade zapret2 zapret2-presets
+/etc/init.d/zapret2 restart
 ```
 
 `/opt/zapret2/config` and the user lists in `/opt/zapret2/ipset/` are conffiles, so an
-upgrade keeps your edits. Upgrade zapret2 by name. A plain `apk upgrade` of the whole
-system is a bad idea on OpenWrt.
+upgrade keeps your edits. If apk wants to ship a new version of one of them, it puts it
+next to yours with a `.apk-new` suffix. Upstream sometimes adds settings to the config,
+and `diff /opt/zapret2/config.default /opt/zapret2/config` shows them, since
+`config.default` follows the package.
+
+Upgrade zapret2 by name. A plain `apk upgrade` of the whole system is a bad idea on
+OpenWrt. New zapret2 releases reach the repository on their own, within about 6 hours.
 
 If you installed zapret2 earlier from a local `.apk` file, apk pins it to that file, and
 `apk add zapret2` keeps the local build even after you add the feed. Back up the config,
@@ -85,6 +93,26 @@ Installing the package changes nothing. Only `apply` touches the config. It back
 `config` and `ipset/zapret-hosts-user.txt` to `*.bak-<timestamp>`, writes the preset
 settings, installs the preset hostlist, restarts the service and prints the commands to
 roll back.
+
+An upgraded `zapret2-presets` does not change the rules zapret2 runs with, because
+`apply` copied them into `/opt/zapret2`. Look at what changed and apply again:
+
+```sh
+apk upgrade zapret2-presets
+diff /opt/zapret2/presets/vn-fpt-steam/hosts.txt /opt/zapret2/ipset/zapret-hosts-user.txt
+zapret2-preset apply vn-fpt-steam
+```
+
+`apply` overwrites `zapret-hosts-user.txt`. Domains you added by hand survive only in the
+`zapret-hosts-user.txt.bak-<timestamp>` backup, so copy them back after applying.
+
+To add a domain without a preset, append it to the list and restart. The strategy lives
+in `NFQWS2_OPT` in `/opt/zapret2/config` and also needs a restart after an edit.
+
+```sh
+echo newdomain.com >> /opt/zapret2/ipset/zapret-hosts-user.txt
+/etc/init.d/zapret2 restart
+```
 
 DPI differs from one ISP to the next, so trust a preset only where its README says it was
 tested. A preset is a directory in

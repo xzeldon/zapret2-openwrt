@@ -148,11 +148,45 @@ SIGINT в batch-режиме игнорирует.
 ## Обновить или удалить
 
 ```sh
-apk update && apk upgrade zapret2         # config и списки это conffiles, они сохранятся
+apk update
+apk list -u | grep zapret                 # пусто, значит обновлять нечего
+apk upgrade zapret2 zapret2-presets
+/etc/init.d/zapret2 restart
 diff /opt/zapret2/config.default /opt/zapret2/config   # появились ли в апстриме новые параметры
 ```
 
-Обновляйте zapret2 по имени. Общий `apk upgrade` на OpenWrt лучше не запускать.
+`config` и списки в `ipset/` это conffiles, обновление их не трогает. Если apk захочет
+положить новую версию такого файла, она появится рядом с суффиксом `.apk-new`.
+`config.default` обновляется вместе с пакетом, поэтому `diff` показывает новые параметры
+апстрима.
+
+Обновляйте zapret2 по имени. Общий `apk upgrade` на OpenWrt лучше не запускать. Новые
+релизы zapret2 попадают в репозиторий сами, примерно через 6 часов после выхода.
+
+### Обновить правила
+
+Обновлённый `zapret2-presets` рабочие правила не меняет: zapret2 работает с копией,
+которую сделал `apply`. Посмотрите, что изменилось, и примените пресет заново:
+
+```sh
+apk upgrade zapret2-presets
+diff /opt/zapret2/presets/vn-fpt-steam/hosts.txt /opt/zapret2/ipset/zapret-hosts-user.txt
+zapret2-preset apply vn-fpt-steam
+```
+
+`apply` перезаписывает `zapret-hosts-user.txt` целиком. Домены, которые вы добавляли
+руками, останутся только в бэкапе `zapret-hosts-user.txt.bak-<дата>`, их надо дописать
+обратно.
+
+Добавить домен без пресета:
+
+```sh
+echo newdomain.com >> /opt/zapret2/ipset/zapret-hosts-user.txt
+/etc/init.d/zapret2 restart
+```
+
+Стратегия задаётся в `NFQWS2_OPT` в `/opt/zapret2/config`, после правки тоже нужен
+`restart`.
 
 Переход между `zapret2` и `zapret2-static`:
 
