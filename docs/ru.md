@@ -155,10 +155,22 @@ apk upgrade zapret2 zapret2-presets
 diff /opt/zapret2/config.default /opt/zapret2/config   # появились ли в апстриме новые параметры
 ```
 
-`config` и списки в `ipset/` это conffiles, обновление их не трогает. Если apk захочет
-положить новую версию такого файла, она появится рядом с суффиксом `.apk-new`.
-`config.default` обновляется вместе с пакетом, поэтому `diff` показывает новые параметры
-апстрима.
+`config` и списки в `ipset/` защищены от перезаписи, обновление их не трогает. Пакет
+перечисляет их в `/etc/apk/protected_paths.d/zapret2.list`, потому что по умолчанию apk
+защищает только `/etc`. Если apk захочет положить новую версию такого файла, она появится
+рядом с суффиксом `.apk-new`. `config.default` обновляется вместе с пакетом, поэтому
+`diff` показывает новые параметры апстрима.
+
+В версиях до `1.0.7-r2` этого списка нет, и обновление перезаписывает конфиг и списки
+значениями по умолчанию, без `.apk-new`. Перед обновлением с такой версии сохраните файлы:
+
+```sh
+tar -czf /root/zapret2-conf.tgz /opt/zapret2/config /opt/zapret2/ipset/*.txt
+```
+
+После обновления распакуйте архив командой `tar -xzf /root/zapret2-conf.tgz -C /` и
+перезапустите zapret2. Если вы пользуетесь только пресетом, хватит
+`zapret2-preset apply <имя>`. Установленную версию покажет `apk list -I zapret2`.
 
 Обновляйте zapret2 по имени. Общий `apk upgrade` на OpenWrt лучше не запускать. Новые
 релизы zapret2 попадают в репозиторий сами, примерно через 6 часов после выхода.
@@ -294,7 +306,7 @@ LuaJIT. LuaJIT для статики берётся из `openresty/luajit2`, т
 `libcap` нужен только при сборке, ради заголовка `sys/capability.h`. `capget` и `capset`
 есть в musl, так что на роутере libcap не нужен.
 
-Conffiles: `/opt/zapret2/config` и пользовательские списки в `/opt/zapret2/ipset/`.
+Conffiles и `/etc/apk/protected_paths.d/zapret2.list`: `/opt/zapret2/config` и пользовательские списки в `/opt/zapret2/ipset/`. Conffiles читает sysupgrade, а защиту при `apk upgrade` даёт только `protected_paths.d`.
 
 ### Грабли
 

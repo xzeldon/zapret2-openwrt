@@ -53,11 +53,25 @@ apk upgrade zapret2 zapret2-presets
 /etc/init.d/zapret2 restart
 ```
 
-`/opt/zapret2/config` and the user lists in `/opt/zapret2/ipset/` are conffiles, so an
-upgrade keeps your edits. If apk wants to ship a new version of one of them, it puts it
-next to yours with a `.apk-new` suffix. Upstream sometimes adds settings to the config,
-and `diff /opt/zapret2/config.default /opt/zapret2/config` shows them, since
-`config.default` follows the package.
+`/opt/zapret2/config` and the user lists in `/opt/zapret2/ipset/` are protected files, so
+an upgrade keeps your edits. The package lists them in
+`/etc/apk/protected_paths.d/zapret2.list`, because apk protects only `/etc` by default.
+If apk wants to ship a new version of one of them, it puts it next to yours with a
+`.apk-new` suffix. Upstream sometimes adds settings to the config, and
+`diff /opt/zapret2/config.default /opt/zapret2/config` shows them, since `config.default`
+follows the package.
+
+Versions before `1.0.7-r2` do not have this list, and an upgrade overwrites the config
+and the lists with the defaults, with no `.apk-new`. Before you upgrade from such a
+version, copy the files away:
+
+```sh
+tar -czf /root/zapret2-conf.tgz /opt/zapret2/config /opt/zapret2/ipset/*.txt
+```
+
+Then upgrade, restore the archive with `tar -xzf /root/zapret2-conf.tgz -C /` and restart
+zapret2. If you only use a preset, `zapret2-preset apply <name>` after the upgrade is
+enough. Check the installed version with `apk list -I zapret2`.
 
 Upgrade zapret2 by name. A plain `apk upgrade` of the whole system is a bad idea on
 OpenWrt. New zapret2 releases reach the repository on their own, within about 6 hours.
