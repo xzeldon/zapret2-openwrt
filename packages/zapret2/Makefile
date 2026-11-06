@@ -11,7 +11,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=zapret2
 PKG_VERSION:=1.0.7
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/bol-van/zapret2.git
@@ -75,7 +75,8 @@ Package/zapret2-static/description=$(Package/zapret2/description)
 # conffiles only feed sysupgrade. apk protects nothing outside /etc by default
 # (see apk-protected_paths(5)), so "apk upgrade" would silently overwrite these
 # files. The protected_paths.d list in the install step below makes apk keep a
-# modified file and write the new version next to it as *.apk-new.
+# modified file and write the new version next to it as *.apk-new. The list
+# names directories, not files (see the install step).
 define Package/zapret2/conffiles
 $(ZAPRET_DIR)/config
 $(ZAPRET_DIR)/ipset/zapret-hosts-user.txt
@@ -161,17 +162,13 @@ define Package/zapret2/install
 	touch $(1)$(ZAPRET_DIR)/ipset/zapret-ip-user.txt
 	touch $(1)$(ZAPRET_DIR)/ipset/zapret-ip-user-exclude.txt
 	touch $(1)$(ZAPRET_DIR)/ipset/zapret-ip-user-ipban.txt
-	# tell apk to keep user-modified config and lists on upgrade (same files as conffiles)
+	# tell apk to keep user-modified files in these two directories on upgrade.
+	# apk 3.0.5 matches the rules against directory names, so a rule for a single
+	# file has no effect. "+" protects a file only if it differs from the package.
 	$(INSTALL_DIR) $(1)/etc/apk/protected_paths.d
 	printf '%s\n' \
-		'# zapret2: keep user-modified config and lists on apk upgrade' \
-		'+$(patsubst /%,%,$(ZAPRET_DIR))/config' \
-		'+$(patsubst /%,%,$(ZAPRET_DIR))/ipset/zapret-hosts-user.txt' \
-		'+$(patsubst /%,%,$(ZAPRET_DIR))/ipset/zapret-hosts-user-exclude.txt' \
-		'+$(patsubst /%,%,$(ZAPRET_DIR))/ipset/zapret-hosts-user-ipban.txt' \
-		'+$(patsubst /%,%,$(ZAPRET_DIR))/ipset/zapret-ip-user.txt' \
-		'+$(patsubst /%,%,$(ZAPRET_DIR))/ipset/zapret-ip-user-exclude.txt' \
-		'+$(patsubst /%,%,$(ZAPRET_DIR))/ipset/zapret-ip-user-ipban.txt' \
+		'+$(patsubst /%,%,$(ZAPRET_DIR))' \
+		'+$(patsubst /%,%,$(ZAPRET_DIR))/ipset' \
 		> $(1)/etc/apk/protected_paths.d/zapret2.list
 	# init script and iface hook are symlinks, as install_easy.sh makes them;
 	# the init script finds ZAPRET_BASE through "readlink /etc/init.d/zapret2"

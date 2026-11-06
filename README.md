@@ -50,7 +50,7 @@ apk upgrade zapret2 zapret2-presets
 
 Always name the packages. Do not run a plain `apk upgrade` on OpenWrt.
 
-The upgrade keeps your config and your user lists. Versions older than `1.0.7-r2` do not
+The upgrade keeps your config and your user lists. Versions older than `1.0.7-r3` do not
 do this. They replace your config with the defaults. Save your files before you upgrade
 from such a version. See [Updating](docs/updating.md).
 

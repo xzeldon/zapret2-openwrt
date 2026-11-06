@@ -53,7 +53,15 @@ The `conffiles` list in `packages/zapret2/Makefile` is for sysupgrade only. apk 
 it. apk protects only `/etc` by default.
 
 For this reason the Makefile also installs `/etc/apk/protected_paths.d/zapret2.list`.
-Each file in `conffiles` needs a `+` rule in this list. See `apk-protected_paths(5)`.
+See `apk-protected_paths(5)`.
+
+apk 3.0.5 (OpenWrt 25.12.5) matches the rules against directory names. A rule for one file,
+such as `+opt/zapret2/config`, has no effect. The list therefore names the directories
+`opt/zapret2` and `opt/zapret2/ipset`. A `+` rule protects a file only if it differs from
+the package, so unchanged files still update.
+
+To test a change, modify the config on a router, run `apk fix --reinstall zapret2` and look
+for `/opt/zapret2/config.apk-new`.
 
 ## Signing key
 

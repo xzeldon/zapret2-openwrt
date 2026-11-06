@@ -13,16 +13,17 @@ New zapret2 releases reach the repository in about 6 hours.
 
 ## What the upgrade keeps
 
-The package protects these files:
+The package protects the files in two directories:
 
-- `/opt/zapret2/config`
-- the user lists in `/opt/zapret2/ipset/`
+- `/opt/zapret2`, which holds `config`
+- `/opt/zapret2/ipset`, which holds the user lists
 
-The package lists them in `/etc/apk/protected_paths.d/zapret2.list`. apk protects only
-`/etc` by default, so this list is necessary.
+The package lists the directories in `/etc/apk/protected_paths.d/zapret2.list`. apk
+protects only `/etc` by default, so this list is necessary.
 
 If you changed a protected file and the new package has a different version, apk writes the
-new version next to yours. The name ends in `.apk-new`. Your file does not change.
+new version next to yours. The name ends in `.apk-new`. Your file does not change. apk
+does not touch a protected file that you did not change.
 
 Upstream sometimes adds settings to the config. `config.default` follows the package. To
 see the new settings, run this command:
@@ -31,7 +32,7 @@ see the new settings, run this command:
 diff /opt/zapret2/config.default /opt/zapret2/config
 ```
 
-## Upgrade from a version older than 1.0.7-r2
+## Upgrade from a version older than 1.0.7-r3
 
 These versions have no protected list. An upgrade replaces your config and your user lists
 with the defaults. apk does not create a `.apk-new` file.
