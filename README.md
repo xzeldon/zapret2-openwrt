@@ -13,8 +13,6 @@ The packages need OpenWrt 25.12 or later. Earlier releases use opkg.
 
 `zapret2` and `zapret2-static` conflict. Install only one of them.
 
-[Документация на русском](docs/ru.md)
-
 ## Install
 
 Run these commands on the router.
